@@ -1,0 +1,33 @@
+# 中国股票数据同步系统 - Python依赖包
+
+# 数据获取和处理
+akshare>=1.15.25
+pandas>=2.2.3
+numpy>=1.26.4
+
+# 数据库连接
+mysql-connector-python>=8.0.33
+sqlalchemy>=2.0.30
+
+# 进度条和日志
+rich>=13.7.1
+tqdm>=4.66.4
+
+# 配置管理
+python-dotenv>=1.0.1
+
+# 网络请求
+requests>=2.31.0
+urllib3>=2.2.2
+
+# 日期时间处理
+python-dateutil>=2.9.0.post0
+
+# 系统工具
+psutil>=5.9.8
+
+# 开发工具（可选）
+pytest>=8.2.2
+pytest-cov>=5.0.0
+black>=24.4.2
+flake8>=7.1.0
