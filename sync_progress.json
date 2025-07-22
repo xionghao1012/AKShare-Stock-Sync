@@ -1,0 +1,15 @@
+{
+  "last_sync_time": "2023-10-27T15:30:45Z",
+  "sync_status": "completed",
+  "total_stocks": 3865,
+  "synced_stocks": 3865,
+  "failed_stocks": 0,
+  "last_synced_stock": "sh688590",
+  "sync_duration_seconds": 1286,
+  "total_records_synced": 1568240,
+  "sync_progress_percent": 100.0,
+  "sync_mode": "full",
+  "database_size_mb": 2456,
+  "last_optimization_time": "2023-10-27T12:00:15Z",
+  "next_scheduled_sync": "2023-10-28T08:00:00Z"
+}
