@@ -1,93 +1,135 @@
-# -*- coding: utf-8 -*-
 """
-AKShare同步控制器
-处理股票数据同步的核心逻辑
+AKShare数据同步控制器 - 优化错误处理
 """
-
-import logging
-from datetime import datetime
-from typing import List, Dict, Optional, Tuple
 from models.akshare_sync_model import AKShareSyncModel
-from models.stock_data_model import StockDataModel
-from utils.error_handler import ErrorHandler
+from views.console_view import ConsoleView
+from config.database_config import DatabaseConfig
+from utils.logger_util import setup_logger
+from utils.error_handler import ErrorHandler, SafeExecutor
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class AKShareSyncController:
-    """AKShare同步控制器"""
+    """AKShare数据同步控制器"""
     
     def __init__(self):
-        """初始化控制器"""
-        self.logger = logging.getLogger(__name__)
-        self.sync_model = AKShareSyncModel()
-        self.stock_model = StockDataModel()
-        self.error_handler = ErrorHandler()
-        
-    def sync_market_data(self, market_type: str, start_date: str, end_date: str) -> bool:
-        """同步指定市场板块的数据"""
+        self.db_config = DatabaseConfig()
+        self.model = AKShareSyncModel(self.db_config)
+        self.view = ConsoleView()
+        self.error_handler = ErrorHandler(__name__)
+        self.safe_executor = SafeExecutor(self.error_handler)
+    
+    def initialize(self) -> bool:
+        """初始化系统，带错误处理"""
         try:
-            self.logger.info(f"开始同步{market_type}板块数据")
+            setup_logger()
+            self.view.show_welcome_message()
             
-            # 获取股票列表
-            stock_codes = self._get_stock_codes_by_market(market_type)
-            if not stock_codes:
-                self.logger.warning(f"未找到{market_type}板块的股票")
+            # 安全执行数据库连接
+            connection_result = self.safe_executor.safe_execute(
+                self.model.connect_database,
+                default_return=False,
+                context="数据库连接初始化"
+            )
+            
+            if not connection_result:
+                self.view.show_error("数据库连接失败")
+                return False
+            
+            self.view.show_success("系统初始化完成")
+            logger.info("系统初始化成功")
+            return True
+            
+        except Exception as e:
+            error_info = self.error_handler.handle_error(e, "系统初始化")
+            self.view.show_error(f"系统初始化失败: {error_info['message']}")
+            return False
+    
+    def sync_by_category(self, category: str) -> bool:
+        """按分类同步数据，带错误处理"""
+        try:
+            self.view.show_progress(f"开始同步 {category} 数据")
+            logger.info(f"开始同步 {category} 数据")
+            
+            # 安全获取数据
+            data_dict = self.safe_executor.safe_execute(
+                self.model.fetch_data_by_category,
+                category,
+                default_return={},
+                context=f"获取 {category} 数据"
+            )
+            
+            if not data_dict:
+                self.view.show_warning(f"没有获取到 {category} 数据")
                 return False
             
             success_count = 0
-            for stock_code in stock_codes:
-                if self.sync_single_stock(stock_code, start_date, end_date):
+            total_count = len(data_dict)
+            
+            for data_name, df in data_dict.items():
+                table_name = f"{category}_{data_name}"
+                
+                # 安全保存数据
+                save_result = self.safe_executor.safe_execute(
+                    self.model.save_data_to_table,
+                    df, table_name,
+                    default_return=False,
+                    context=f"保存 {table_name} 数据"
+                )
+                
+                if save_result:
                     success_count += 1
+                    logger.info(f"成功保存 {table_name} 数据")
+                else:
+                    logger.warning(f"保存 {table_name} 数据失败")
             
-            self.logger.info(f"{market_type}板块同步完成，成功{success_count}只，总计{len(stock_codes)}只")
-            return success_count > 0
+            # 显示结果
+            result_message = f"{category} 数据同步完成: {success_count}/{total_count}"
+            if success_count == total_count:
+                self.view.show_success(result_message)
+                logger.info(result_message)
+            else:
+                self.view.show_warning(result_message)
+                logger.warning(result_message)
+            
+            return success_count == total_count
             
         except Exception as e:
-            self.logger.error(f"同步{market_type}板块数据失败: {e}")
+            error_info = self.error_handler.handle_error(e, f"同步 {category} 数据")
+            self.view.show_error(f"同步 {category} 数据失败: {error_info['message']}")
             return False
     
-    def sync_single_stock(self, stock_code: str, start_date: str, end_date: str) -> bool:
-        """同步单个股票的数据"""
+    def sync_all_data(self) -> bool:
+        """同步所有数据"""
+        return self.model.sync_all_data()
+    
+    def interactive_sync(self):
+        """交互式同步"""
+        categories = list(self.model.data_sources.keys())
+        
+        self.view.show_info("可用的数据分类:")
+        for i, category in enumerate(categories, 1):
+            print(f"{i}. {category}")
+        
+        choice = self.view.prompt_user_input("请选择要同步的分类 (输入数字，0表示全部)")
+        
         try:
-            # 验证日期格式
-            self._validate_date_format(start_date)
-            self._validate_date_format(end_date)
-            
-            # 获取股票数据
-            stock_data = self.sync_model.get_stock_data(stock_code, start_date, end_date)
-            if stock_data is None or stock_data.empty:
-                self.logger.warning(f"股票{stock_code}无数据")
+            choice_num = int(choice)
+            if choice_num == 0:
+                return self.sync_all_data()
+            elif 1 <= choice_num <= len(categories):
+                category = categories[choice_num - 1]
+                return self.sync_by_category(category)
+            else:
+                self.view.show_error("无效的选择")
                 return False
-            
-            # 保存到数据库
-            success = self.stock_model.save_stock_data(stock_code, stock_data)
-            if success:
-                self.logger.info(f"股票{stock_code}数据同步成功，共{len(stock_data)}条记录")
-            
-            return success
-            
-        except Exception as e:
-            self.logger.error(f"同步股票{stock_code}数据失败: {e}")
+        except ValueError:
+            self.view.show_error("请输入有效的数字")
             return False
     
-    def _get_stock_codes_by_market(self, market_type: str) -> List[str]:
-        """根据市场类型获取股票代码列表"""
-        market_map = {
-            'RB': '主板',      # 主板
-            'ZB': '中小板',    # 中小板
-            'CYB': '创业板',   # 创业板
-            'KCB': '科创板'    # 科创板
-        }
-        
-        if market_type not in market_map:
-            return []
-        
-        # 这里应该调用实际的API获取股票列表
-        # 暂时返回示例数据
-        return self.sync_model.get_stock_codes_by_market(market_type)
-    
-    def _validate_date_format(self, date_str: str) -> bool:
-        """验证日期格式"""
-        try:
-            datetime.strptime(date_str, '%Y%m%d')
-            return True
-        except ValueError:
-            raise ValueError(f"日期格式错误: {date_str}，应为YYYYMMDD格式")
+    def cleanup(self):
+        """清理资源"""
+        if self.model:
+            self.model.close_connection()

@@ -1,76 +1,62 @@
-# -*- coding: utf-8 -*-
 """
-AKShare股票数据同步主程序
+AKShare数据同步主程序
 """
+import sys
+import argparse
+from controllers.akshare_sync_controller import AKShareSyncController
 
-import logging
-import time
-from datetime import datetime
-from core.smart_stock_sync import SmartStockSync
-from utils.logger_util import setup_logger
-from config.sync_config import SyncConfig
-from tools.system_monitor import SystemMonitor
+
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='AKShare数据同步系统')
+    parser.add_argument('--category', '-c', 
+                       choices=['stock', 'futures', 'fund', 'bond', 'forex', 'macro', 'news', 'industry'],
+                       help='指定同步的数据分类')
+    parser.add_argument('--interactive', '-i', action='store_true',
+                       help='启用交互模式')
+    parser.add_argument('--all', '-a', action='store_true',
+                       help='同步所有数据')
+    
+    return parser.parse_args()
+
 
 def main():
-    """主函数"""
-    # 初始化配置
-    config = SyncConfig()
-    
-    # 设置日志
-    logger = setup_logger(
-        log_file=config.log_file,
-        log_level=config.log_level
-    )
-    
-    # 记录开始时间
-    start_time = time.time()
-    logger.info(f"===== AKShare股票数据同步系统启动 ===== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # 系统监控
-    system_monitor = SystemMonitor()
-    system_info = system_monitor.get_system_info()
-    logger.info(f"系统信息: {system_info}")
+    """主程序"""
+    controller = None
     
     try:
-        # 创建同步实例
-        sync_manager = SmartStockSync()
+        args = parse_arguments()
+        controller = AKShareSyncController()
         
-        # 获取股票列表
-        logger.info("获取股票列表...")
-        stock_list = sync_manager.get_stock_list()
-        logger.info(f"共获取到{len(stock_list)}只股票")
+        if not controller.initialize():
+            return False
         
-        if not stock_list:
-            logger.error("未获取到股票列表，同步终止")
-            return
+        if args.interactive:
+            success = controller.interactive_sync()
+        elif args.all:
+            success = controller.sync_all_data()
+        elif args.category:
+            success = controller.sync_by_category(args.category)
+        else:
+            # 默认交互模式
+            success = controller.interactive_sync()
         
-        # 执行同步
-        logger.info("开始同步股票数据...")
-        result = sync_manager.sync_stock_batch(
-            stock_list,
-            start_date=datetime.now().strftime('%Y%m%d'),
-            end_date=datetime.now().strftime('%Y%m%d'),
-            batch_size=config.batch_size
-        )
+        controller.view.show_completion_message(success)
+        return success
         
-        # 记录结果
-        logger.info(f"同步完成: 成功{result['success_count']}只, 失败{result['failed_count']}只")
-        if result['failed_stocks']:
-            logger.warning(f"同步失败的股票: {', '.join(result['failed_stocks'][:10])}{'...' if len(result['failed_stocks'])>10 else ''}")
-        
-        # 优化数据库
-        if config.enable_optimization:
-            logger.info("开始优化数据库...")
-            sync_manager.optimize_database()
-            logger.info("数据库优化完成")
-        
+    except KeyboardInterrupt:
+        if controller:
+            controller.view.show_info("程序被用户中断")
+        return False
     except Exception as e:
-        logger.error(f"同步过程中发生错误: {str(e)}", exc_info=True)
+        if controller:
+            controller.view.show_error(f"程序执行错误: {e}")
+        return False
     finally:
-        # 记录结束时间
-        end_time = time.time()
-        duration = end_time - start_time
-        logger.info(f"===== AKShare股票数据同步系统结束 ===== 耗时: {duration:.2f}秒")
+        if controller:
+            controller.cleanup()
 
-if __name__ == '__main__':
-    main()
+
+if __name__ == "__main__":
+    success = main()
+    sys.exit(0 if success else 1)
